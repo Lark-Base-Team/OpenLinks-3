@@ -9,15 +9,17 @@ interface Video {
   nickname: string;         // 视频作者昵称
   aweme_id: string;         // 视频的唯一标识符 (视频编号)
   share_url: string;        // 视频分享链接
-  conv_create_time: string; // 视频发布时间 (可能是多种格式: YYYYMMDD, 时间戳秒/毫秒, 标准日期字符串)
+  conv_create_time: string | null; // 视频发布时间 (可能是多种格式: YYYYMMDD, 时间戳秒/毫秒, 标准日期字符串)
   desc: string;             // 视频描述/标题
-  digg_count: string;       // 点赞数 (字符串形式)
-  collect_count: string;    // 收藏数 (字符串形式)
-  comment_count: string;    // 评论数 (字符串形式)
-  duration: string;         // 视频时长 (秒, 字符串形式)
+  digg_count: number;       // 点赞数 (后端返回整数类型)
+  collect_count: number;    // 收藏数 (后端返回整数类型)
+  comment_count: number;    // 评论数 (后端返回整数类型)
+  duration: number;         // 视频时长 (毫秒, 后端返回整数类型)
   play_addr: string;        // 视频播放/下载地址
   audio_addr: string;       // 音频播放/下载地址
-  share_count: string;      // 分享数 (字符串形式)
+  share_count: number;      // 分享数 (后端返回整数类型)
+  video_text_ori?: string;  // 原始ASR文案 (可选)
+  video_text_arr?: string;  // LLM整理后文案 (可选)
 }
 
 // 定义前端数据模型到飞书表格字段的映射关系
@@ -264,11 +266,24 @@ export async function getVideosData(
         raw_url_inputs: singleUrl,   // 使用后端期望的字段名
       };
 
-      logger(`发送请求到 ${API_BASE_URL}/api/video/doutikhub`);
+      // --- 根据平台选择正确的API端点 ---
+      const getApiEndpoint = (platform: string) => {
+        switch(platform) {
+          case 'douyin':
+            return `${API_BASE_URL}/api/video/douyin-data`;
+          case 'tiktok':
+            return `${API_BASE_URL}/api/video/tiktok-data`;
+          default:
+            throw new Error(`不支持的平台: ${platform}`);
+        }
+      };
+
+      const apiEndpoint = getApiEndpoint(platform);
+      logger(`发送请求到 ${apiEndpoint}`);
       logger(`请求数据: ${JSON.stringify(requestData, null, 2)}`);
 
       // --- 发送 API 请求 ---
-      const response = await axios.post(`${API_BASE_URL}/api/video/doutikhub`, requestData);
+      const response = await axios.post(apiEndpoint, requestData);
 
       logger(`收到响应: ${JSON.stringify(response.data, null, 2)}`);
 
@@ -462,14 +477,26 @@ export async function getVideosData(
                 }
             }
             if (fieldMap['描述']) fields[fieldMap['描述']] = String(video.desc || '');
-            // 对于数字类型，先转字符串再 parseInt，并提供默认值 0，防止 NaN
-            if (fieldMap['点赞数']) fields[fieldMap['点赞数']] = parseInt(String(video.digg_count)) || 0;
-            if (fieldMap['收藏数']) fields[fieldMap['收藏数']] = parseInt(String(video.collect_count)) || 0;
-            if (fieldMap['评论数']) fields[fieldMap['评论数']] = parseInt(String(video.comment_count)) || 0;
-            if (fieldMap['时长']) fields[fieldMap['时长']] = Math.round(parseInt(String(video.duration)) / 1000) || 0; // 毫秒转秒
+            // 后端返回的是数字类型，直接使用或提供默认值 0
+            if (fieldMap['点赞数']) fields[fieldMap['点赞数']] = typeof video.digg_count === 'number' ? video.digg_count : 0;
+            if (fieldMap['收藏数']) fields[fieldMap['收藏数']] = typeof video.collect_count === 'number' ? video.collect_count : 0;
+            if (fieldMap['评论数']) fields[fieldMap['评论数']] = typeof video.comment_count === 'number' ? video.comment_count : 0;
+            if (fieldMap['时长']) fields[fieldMap['时长']] = typeof video.duration === 'number' ? Math.round(video.duration / 1000) : 0; // 毫秒转秒
             if (fieldMap['下载链接']) fields[fieldMap['下载链接']] = String(video.play_addr || '');
             if (fieldMap['音频链接']) fields[fieldMap['音频链接']] = String(video.audio_addr || '');
-            if (fieldMap['分享数']) fields[fieldMap['分享数']] = parseInt(String(video.share_count)) || 0;
+            if (fieldMap['分享数']) fields[fieldMap['分享数']] = typeof video.share_count === 'number' ? video.share_count : 0;
+
+            // --- 处理文案字段 ---
+            // 需要先扩展 Video 接口以包含文案字段
+            const videoWithText = video as any; // 临时类型转换
+            if (fieldMap['文案']) {
+                // 优先使用整理后文案，其次使用原始文案
+                const textContent = videoWithText.video_text_arr || videoWithText.video_text_ori || '';
+                fields[fieldMap['文案']] = String(textContent);
+                if (textContent) {
+                    logger(`视频 ${video.aweme_id} 包含文案数据: ${textContent.substring(0, 50)}...`);
+                }
+            }
 
             // --- **核心去重逻辑：检查视频编号是否存在** ---
             // 只有在成功获取到视频编号的情况下才进行检查

@@ -821,8 +821,9 @@ function LoadApp() {
           template_version_name: templateVersionName,
           aweme_ids: allAwemeIds
         });
-      toast.success('新增记录通知发送完毕');
-      console.log('新增记录通知发送完毕');
+      const currentTime = new Date().toLocaleString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      toast.success(`新增记录通知发送完毕 (${currentTime})`);
+      console.log(`新增记录通知发送完毕 (${currentTime})`);
       toast.info(`订阅任务执行完成，等待执行下一次订阅任务... (${intervalHours}小时后)`);
       console.log(`订阅任务执行完成，等待执行下一次订阅任务... (${intervalHours}小时后)`);
       }
